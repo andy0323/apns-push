@@ -1,0 +1,179 @@
+#!/usr/bin/env node
+
+require('shelljs/global');
+var fs          = require('fs'),
+	apn = require('apn'),
+	program     = require('commander'),
+	version     = require("../package.json").version,
+	pemBuilder  = require('../lib/apns-build.js');
+
+var Promise = require("bluebird");
+
+var pemCertPath = __dirname + '/../pem/cert.pem';
+var pemKeyPath  = __dirname + '/../pem/key.pem';
+
+/// 配置参数
+var options = {
+	cert : pemCertPath,
+	key  : pemKeyPath
+};
+var apnConnection = new apn.Connection(options);
+
+// DEFINE 
+PUSH_FILE_RENAME = 'pushfile';
+
+program
+  .version(version)
+    .usage("app_push")
+    .option('init', 'create a pushFile')
+    .option('pem',  'create push pem')
+    .option('push', 'push remote notification')
+  .parse(process.argv);
+
+/// Create a pushFile 
+if (program.init) 
+{
+	// 当前目录是否存在pushfile
+	var isExists = fs.existsSync('./' + PUSH_FILE_RENAME);
+	if (isExists) {
+		console.log('初始化失败 \nError：当前目录下已存在文件' + PUSH_FILE_RENAME);
+		return;
+	};
+
+	// 开始初始化
+	console.log('开始初始化pushfile文件..');
+
+	// data
+	var pushfile = {};
+
+	// promise 
+	read('请输入推送证书路径').then(function(userInput){
+		pushfile.certPath = userInput;
+		return read('请输入推送证书密钥路径');
+	}).then(function(userInput){
+		pushfile.keyPath = userInput;
+		return read('请输入设备标识符，DeviceToken（多个DeviceToken请用\"|\"隔开）');
+	}).then(function(userInput){
+		var userTokens = userInput.split('|');
+		pushfile.deviceToken = userTokens;
+		return read('推送证书选择服务是否为生产服务（yes:no）');
+	}).then(function(userInput){
+		if (userInput == 'yes') 
+			pushfile.node_env = 'production';
+		else 
+			pushfile.node_env = 'development';
+		return read('请输入推送标题');
+	}).then(function(userInput){
+		pushfile.alert = userInput;
+		return read('请输入推送内容');
+	}).then(function(userInput){
+		pushfile.payload = {payload:userInput};
+		return read('请输入推送角标个数');
+	}).then(function(userInput){
+		pushfile.badge = userInput;
+		return read('请输入推送铃声');
+	}).then(function(userInput){
+		pushfile.sound = userInput;
+	}).then(function(){
+		// parse pushfile 
+		var jsonString = JSON.stringify(pushfile, null, 4);
+
+		// create pushfile
+		fs.writeFile('pushfile', jsonString, function(error){
+			if (error) 
+				console.log('ERROR：create pushfile failed');
+			else
+				console.log('create pushfile success. please run \"apns-push\"');
+		});
+	});
+	return;
+}
+
+/// create push pem
+if (program.pem) 
+{
+	// 当前目录是否存在pushfile
+	var isExists = fs.existsSync('./' + PUSH_FILE_RENAME);
+	if (!isExists) {
+		console.log('创建失败 \nError：当前目录下不存在文件' + PUSH_FILE_RENAME);
+		return;
+	};	
+
+	// 读取文件内容
+	var jsonString = fs.readFileSync('./' + PUSH_FILE_RENAME, 'utf-8');
+
+	// JSON对象
+	var pushfile = JSON.parse(jsonString);
+
+	// 创建证书
+	var certPath    = pushfile.certPath;
+	var keyPath     = pushfile.keyPath;
+
+	// 清除pem
+	if(fs.existsSync(pemCertPath)) rm(pemCertPath);
+	if(fs.existsSync(pemKeyPath))  rm(pemKeyPath);
+
+	// 创建pem
+	pemBuilder.node(certPath, keyPath, pemCertPath, pemKeyPath);
+}
+
+/// push remote notification
+if (program.push)
+{
+	// 当前目录是否存在pushfile
+	var isExists = fs.existsSync('./' + PUSH_FILE_RENAME);
+	if (!isExists) {
+		console.log('推送失败 \nError：当前目录下不存在文件' + PUSH_FILE_RENAME);
+		return;
+	};	
+
+	// 读取文件内容
+	var jsonString = fs.readFileSync('./' + PUSH_FILE_RENAME, 'utf-8');
+
+	// JSON对象
+	var pushfile = JSON.parse(jsonString);
+
+	// 设置环境变量
+	options = pushfile.node_env;
+
+	// 获取元素
+	var deviceToken = pushfile.deviceToken;
+	var alert       = pushfile.alert;
+	var payload     = pushfile.payload;
+	var badge       = pushfile.badge;
+	var sound       = pushfile.sound;	
+
+	// 开始推送
+	push(deviceToken, alert, payload, badge, sound);
+} 
+
+/**
+ * 获取用户输入信息
+ */
+function read(prompt) {
+	return new Promise(function (resolve, reject){
+    	process.stdout.write(prompt + ':');
+    	process.stdin.resume();
+    	process.stdin.setEncoding('utf-8');
+    	process.stdin.on('data', function(chunk) {
+        	process.stdin.pause();
+        	chunk = chunk.split('\n')[0];
+        	resolve(chunk);
+    	});
+    });
+}
+
+/**
+ * 发送推送
+ */
+function push(deviceTokens, alert, payload, badge, sound) {
+	var note = new apn.Notification();
+
+	note.expiry = Math.floor(Date.now() / 1000);
+	note.badge = badge;
+	note.sound = sound;
+	note.alert = alert;
+	note.payload = payload;
+
+	apnConnection.pushNotification(note, deviceTokens);
+}

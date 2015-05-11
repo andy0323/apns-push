@@ -1,0 +1,17 @@
+{
+  "name": "ADPushServer",
+  "version": "1.0.0",
+  "description": "Simple Push Server",
+  "main": "index.js",
+  "scripts": {
+    "test": "bin/quick-push"
+  },
+  "author": "Andy Jin",
+  "license": "ISC",
+  "dependencies": {
+    "apn": "^1.7.3",
+    "bluebird": "^2.9.24",
+    "commander": "^2.7.1",
+    "shelljs": "^0.4.0"
+  }
+}
